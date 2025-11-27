@@ -90,7 +90,56 @@ def accuracy(pred, y):
     return (pred == y).float().mean().item()
 
 
+def run(hidden=500, n_layers=2, epochs=40, batch=64, theta=2.0, lr=0.003, seed=0):
+    torch.manual_seed(seed)
+    Xtr, Xte, ytr, yte = load_data(seed)
+    ff = FFNet([64] + [hidden] * n_layers, theta=theta, lr=lr)
+    bp = mlp([64] + [hidden] * n_layers + [N_CLASSES])
+    bp_opt = torch.optim.Adam(bp.parameters(), lr=1e-3)
+
+    hist = {"ff": [], "bp": []}
+    for _ in range(epochs):
+        perm = torch.randperm(len(Xtr))
+        for i in range(0, len(Xtr), batch):
+            idx = perm[i:i + batch]
+            ff.train_step(Xtr[idx], ytr[idx])
+            bp_opt.zero_grad()
+            F.cross_entropy(bp(Xtr[idx]), ytr[idx]).backward()
+            bp_opt.step()
+        with torch.no_grad():
+            hist["ff"].append(accuracy(ff.predict(Xte), yte))
+            hist["bp"].append(accuracy(bp(Xte).argmax(1), yte))
+    with torch.no_grad():
+        hist["ff_train"] = accuracy(ff.predict(Xtr), ytr)
+        hist["bp_train"] = accuracy(bp(Xtr).argmax(1), ytr)
+    return hist
 
 
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--quick", action="store_true")
+    p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--hidden", type=int, default=500)
+    args = p.parse_args()
+    epochs, hidden = (5, 100) if args.quick else (args.epochs, args.hidden)
+
+    hist = run(hidden=hidden, epochs=epochs)
+    print(f"forward-forward  train {hist['ff_train']:.3f}  test {hist['ff'][-1]:.3f}")
+    print(f"backprop MLP     train {hist['bp_train']:.3f}  test {hist['bp'][-1]:.3f}")
+
+    ep = np.arange(1, epochs + 1)
+    plt.figure(figsize=(6, 4))
+    plt.plot(ep, hist["ff"], label=f"forward-forward ({hist['ff'][-1]:.3f})")
+    plt.plot(ep, hist["bp"], label=f"backprop ({hist['bp'][-1]:.3f})")
+    plt.axhline(0.1, color="gray", ls=":", label="chance")
+    plt.xlabel("epoch")
+    plt.ylabel("test accuracy")
+    plt.title(f"load_digits, 64-{hidden}-{hidden}")
+    plt.ylim(0, 1)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("demo.png", dpi=120)
 
 
+if __name__ == "__main__":
+    main()
